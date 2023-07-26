@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+
+from importlib.metadata import version
+import requests
+import os
+import sys
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('mailbox')
+parser.add_argument('-v', '--version', action='version', version=version('dnmx-register'))
+parser.add_argument('-o', '--captcha-path', default="captcha.png", metavar="captcha.png", help="path where the program will save an .png image")
+parser.add_argument('-f', '--overwrite-captcha', action="store_true", help="if specified, the program will overwrite -o")
+parser.add_argument('-p', '--password', metavar="password", help="if not used, the program will prompt for a password")
+parser.add_argument('-c', '--no-confirm-password', action="store_true", help="if specified, the program will not prompt for password confirmation")
+args = parser.parse_args()
+
+if os.path.exists(args.captcha_path) and args.overwrite_captcha == False:
+    print(f"{args.captcha_path} already exists", file=sys.stderr)
+    exit(1)
+
+if not args.password:
+    args.password = input('password: ')
+    if not args.no_confirm_password:
+        while args.password != input('confirm password: '):
+            print("passwords doesn't match")
+            args.password = input('password: ')
+
+# if socks version is not specified, assume as socks5
+for proxy_env_name in ["all_proxy", "ALL_PROXY"]:
+    if os.environ.get(proxy_env_name):
+        if "socks://" in os.environ[proxy_env_name]:
+            os.environ[proxy_env_name] = os.environ[proxy_env_name].replace("socks://", "socks5://")
+
+session = requests.Session()
+
+def get_or_die(session, url, **kwargs):
+    req = session.get(url, **kwargs)
+    if req.status_code != 200:
+        print(f"could not get {url} status code {req.status_code}", file=sys.stderr)
+        exit(1)
+    return req
+
+get_or_die(session, "https://access.dnmx.org/register.php")
+
+png_data = get_or_die(session, "https://access.dnmx.org/dnmx/captcha.php").content
+
+f = open(args.captcha_path, 'wb+')
+f.write(png_data)
+f.close()
+
+captcha = input('captcha: ')
+
+data = {
+    "username": args.mailbox,
+    "pass1": args.password,
+    "pass2": args.password,
+    "captcha": captcha,
+}
+
+req = session.post("https://access.dnmx.org/register.php", data=data)
+
+if req.status_code == 200:
+    print(f"{args.mailbox}@dnmx.org created succesfully")
+    exit(0)
+else:
+    print(f"{args.mailbox}@dnmx.org creation failed", file=sys.stderr)
+    exit(1)
